@@ -1,123 +1,152 @@
-#include <stdio.h>
-#include <string.h>
+#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
 
-// 总通行路线数量
-#define ROUTE_NUM 13
+using namespace std;
 
-int main()
-{
-    // 13条可通行路线名称
-    const char *routes[ROUTE_NUM] = {
-        "A→B", "A→C", "A→D",
-        "B→A", "B→C", "B→D",
-        "D→A", "D→B", "D→C",
-        "E→A", "E→B", "E→C", "E→D"
-    };
+// 1. 定义13条通行路线
+struct Route {
+    int id;
+    string name;
+    int degree;
+};
 
-    // 冲突邻接矩阵：1=路线冲突不可同时通行，0=无冲突可同时通行
-    int conflict[ROUTE_NUM][ROUTE_NUM] = {
-        {0,0,0, 0,1,1, 1,1,0, 0,1,0,0},   // A→B
-        {0,0,0, 1,1,1, 1,0,0, 1,1,0,0},   // A→C
-        {0,0,0, 1,0,0, 0,0,0, 0,1,1,0},   // A→D
-        {0,1,1, 0,0,0, 0,1,1, 0,1,1,1},   // B→A
-        {1,1,0, 0,0,0, 1,1,0, 1,0,0,1},   // B→C
-        {1,1,0, 0,0,0, 0,0,0, 0,1,0,0},   // B→D
-        {1,1,0, 0,1,0, 0,0,0, 1,0,0,0},   // D→A
-        {1,0,0, 1,1,0, 0,0,0, 1,0,0,1},   // D→B
-        {0,0,0, 1,0,0, 0,0,0, 0,0,0,0},   // D→C
-        {0,1,0, 0,1,0, 1,1,0, 0,0,0,0},   // E→A
-        {1,1,1, 1,0,1, 0,0,0, 0,0,0,0},   // E→B
-        {0,0,1, 1,0,0, 0,0,0, 0,0,0,0},   // E→C
-        {0,0,0, 1,1,0, 0,1,0, 0,0,0,0}    // E→D
-    };
+vector<Route> nodes = {
+    {0, "A->B"}, {1, "A->C"}, {2, "A->D"},  // A入口
+    {3, "B->A"}, {4, "B->C"}, {5, "B->D"},  // B入口
+    {6, "D->A"}, {7, "D->B"}, {8, "D->C"},  // D入口
+    {9, "E->A"}, {10, "E->B"}, {11, "E->C"}, {12, "E->D"} // E入口
+};
 
-    int degrees[ROUTE_NUM];   // 每个顶点（路线）的度数（冲突数）
-    int vertices[ROUTE_NUM];  // 顶点索引，用于按度数排序
-    int color[ROUTE_NUM];     // 着色结果，-1表示未着色
+const int N = 13;
+bool adj[N][N] = {false};
 
-    // 1. 计算每个顶点的度数
-    for (int i = 0; i < ROUTE_NUM; i++) {
-        degrees[i] = 0;
-        for (int j = 0; j < ROUTE_NUM; j++) {
-            degrees[i] += conflict[i][j];
+// 添加冲突边
+void addConflict(int u, int v) {
+    adj[u][v] = adj[v][u] = true;
+}
+
+// 构建冲突图（根据教材图1.3(b)的连线关系）
+void buildGraph() {
+    // 0:AB, 1:AC, 2:AD
+    addConflict(0, 4); addConflict(0, 5); addConflict(0, 6); addConflict(0, 7); addConflict(0, 9); addConflict(0, 10);
+    addConflict(1, 4); addConflict(1, 5); addConflict(1, 6); addConflict(1, 7); addConflict(1, 9); addConflict(1, 10); addConflict(1, 11);
+    addConflict(2, 4); addConflict(2, 5); addConflict(2, 6); addConflict(2, 7); addConflict(2, 9); addConflict(2, 10); addConflict(2, 11);
+
+    // 4:BC, 5:BD
+    addConflict(4, 6); addConflict(4, 7); addConflict(4, 10); addConflict(4, 11); // 注意：4与9不冲突（都在相位2）
+    addConflict(5, 6); addConflict(5, 7); addConflict(5, 10); addConflict(5, 11); // 注意：5与9不冲突
+
+    // 9:EA
+    addConflict(9, 6); addConflict(9, 7); addConflict(9, 10); addConflict(9, 11);
+
+    // 6:DA, 7:DB
+    addConflict(6, 10); addConflict(6, 11); // 6与7不冲突（都在相位3）
+    addConflict(7, 10); addConflict(7, 11);
+
+    // 10:EB, 11:EC
+    // 10与11不冲突（都在相位4）
+}
+
+// 计算冲突度数
+void calculateDegrees() {
+    for (int i = 0; i < N; ++i) {
+        nodes[i].degree = 0;
+        for (int j = 0; j < N; ++j) {
+            if (adj[i][j]) nodes[i].degree++;
         }
-        vertices[i] = i; // 初始化顶点索引
+    }
+}
+
+// 检查颜色是否安全
+bool isSafe(int node, int color, const vector<int>& colors) {
+    for (int i = 0; i < N; ++i) {
+        if (adj[node][i] && colors[i] == color) return false;
+    }
+    return true;
+}
+
+// 回溯搜索函数
+bool solve(int idx, const vector<int>& sortedNodes, int numColors, vector<int>& colors) {
+    if (idx == sortedNodes.size()) return true;
+    int node = sortedNodes[idx];
+    for (int c = 1; c <= numColors; ++c) {
+        if (isSafe(node, c, colors)) {
+            colors[node] = c;
+            if (solve(idx + 1, sortedNodes, numColors, colors)) return true;
+            colors[node] = -1; // 回溯
+        }
+    }
+    return false;
+}
+
+int main() {
+    cout << "========== 多岔路口交通管理 - 求解过程 ==========" << endl;
+    cout << "步骤1：构建图模型。将13条路线抽象为节点，冲突关系抽象为边。" << endl;
+    buildGraph();
+    
+    cout << "步骤2：计算每个节点的冲突度数，并按度数从大到小排序。" << endl;
+    calculateDegrees();
+    
+    vector<int> sortedNodes(N);
+    for (int i = 0; i < N; ++i) sortedNodes[i] = i;
+    sort(sortedNodes.begin(), sortedNodes.end(), [](int a, int b) {
+        return nodes[a].degree > nodes[b].degree;
+    });
+
+    cout << "排序后的节点处理顺序（优先处理冲突最多的节点）: ";
+    for (int n : sortedNodes) cout << nodes[n].name << " ";
+    cout << "\n\n";
+
+    cout << "步骤3：开始图着色搜索（采用回溯法寻找最优解）。" << endl;
+    
+    vector<int> colors(N, -1);
+    
+    // 强制将孤立节点（右转路线）初始化为0号色（常通相位）
+    colors[3] = 0;  // B->A
+    colors[8] = 0;  // D->C
+    colors[12] = 0; // E->D
+    
+    // 提取剩余需要着色的节点
+    vector<int> remainingNodes;
+    for (int n : sortedNodes) {
+        if (colors[n] == -1) remainingNodes.push_back(n);
     }
 
-    // 2. 按度数从大到小排序顶点索引（选择排序）
-    for (int i = 0; i < ROUTE_NUM - 1; i++) {
-        int max_idx = i;
-        for (int j = i + 1; j < ROUTE_NUM; j++) {
-            if (degrees[vertices[j]] > degrees[vertices[max_idx]]) {
-                max_idx = j;
-            }
+    // 尝试用1、2、3、4号颜色为剩余节点着色（加上0号色共5个相位）
+    bool found = false;
+    for (int numColors = 1; numColors <= 4; ++numColors) {
+        fill(colors.begin(), colors.end(), -1);
+        colors[3] = 0; colors[8] = 0; colors[12] = 0; // 每次重置时保留0号色
+        
+        if (solve(0, remainingNodes, numColors, colors)) {
+            found = true;
+            break;
         }
-        // 交换索引
-        int temp = vertices[i];
-        vertices[i] = vertices[max_idx];
-        vertices[max_idx] = temp;
     }
 
-    // 3. 初始化着色数组为-1（未着色）
-    memset(color, -1, sizeof(color));
-    int current_color = 0;
+    if (found) {
+        cout << "步骤4：搜索完成！成功找到最少相位分配。\n" << endl;
 
-    // 4. Welsh-Powell 贪心着色算法
-    while (1) {
-        // 找到第一个未着色的顶点
-        int first_uncolored = -1;
-        for (int i = 0; i < ROUTE_NUM; i++) {
-            if (color[vertices[i]] == -1) {
-                first_uncolored = vertices[i];
-                break;
+        cout << "========== 最终相位分配结果 ==========" << endl;
+        for (int c = 0; c <= 4; ++c) {
+            if (c == 0) {
+                cout << "相位 0 (0号色灯 / 常通相位，右转车辆无冲突，常亮):" << endl;
+            } else {
+                cout << "相位 " << c << " (" << c << "号色灯 / 轮转相位):" << endl;
             }
-        }
-        if (first_uncolored == -1) {
-            break; // 所有顶点已着色，结束
-        }
-
-        // 给第一个未着色顶点分配当前颜色
-        color[first_uncolored] = current_color;
-
-        // 给所有与已着色顶点不冲突的未着色顶点分配当前颜色
-        for (int i = 0; i < ROUTE_NUM; i++) {
-            int v = vertices[i];
-            if (color[v] == -1) {
-                int is_safe = 1;
-                // 检查是否与所有已着当前色的顶点都不冲突
-                for (int u = 0; u < ROUTE_NUM; u++) {
-                    if (color[u] == current_color && conflict[v][u] == 1) {
-                        is_safe = 0;
-                        break;
-                    }
+            
+            for (int i = 0; i < N; ++i) {
+                if (colors[i] == c) {
+                    cout << "  - " << nodes[i].name << endl;
                 }
-                if (is_safe) {
-                    color[v] = current_color;
-                }
             }
+            cout << "-------------------------------------------" << endl;
         }
-        current_color++;
+    } else {
+        cout << "步骤4：搜索失败，未能找到合适的相位分配。" << endl;
     }
-
-    // 5. 输出信号相位方案
-    printf("=== 五岔路口信号相位方案 ===\n");
-    printf("最少需要 %d 个信号相位\n\n", current_color);
-
-    for (int phase = 0; phase < current_color; phase++) {
-        printf("第 %d 相位可通行路线：\n", phase + 1);
-        printf("  ");
-        int first_route = 1;
-        for (int i = 0; i < ROUTE_NUM; i++) {
-            if (color[i] == phase) {
-                if (!first_route) {
-                    printf("、");
-                }
-                printf("%s", routes[i]);
-                first_route = 0;
-            }
-        }
-        printf("\n\n");
-    }
-
+    
     return 0;
 }
